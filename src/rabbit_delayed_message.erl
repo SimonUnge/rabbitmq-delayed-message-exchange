@@ -186,43 +186,21 @@ recover() ->
     %% topology recovery has already happened, we have to recover state for any durable
     %% consistent hash exchanges since plugin activation was moved later in boot process
     %% starting with RabbitMQ 3.8.4
-    case list_exchanges() of
-        {ok, Xs} ->
-            rabbit_log:debug("Delayed message exchange: "
-                              "have ~b durable exchanges to recover",
-                             [length(Xs)]),
-            [recover_exchange_and_bindings(X) || X <- lists:usort(Xs)];
-        {aborted, Reason} ->
-            rabbit_log:error(
-                "Delayed message exchange: "
-                 "failed to recover durable bindings of one of the exchanges, reason: ~p",
-                [Reason])
-    end.
+    Xs = list_exchanges(),
+    rabbit_log:debug("Delayed message exchange: "
+                     "have ~b durable exchanges to recover",
+                     [length(Xs)]),
+    [recover_exchange_and_bindings(X) || X <- lists:usort(Xs)].
 
 list_exchanges() ->
-    %% TODO Change to fetch from khperi.
-    %% I think like this:
-    %% rabbit_db_exchange:match(#exchange{durable = true,
-    %%                                    type = 'x-delayed-message',
-    %%                                    _ = '_'})
-    case mnesia:transaction(
-           fun () ->
-                   mnesia:match_object(
-                     rabbit_exchange, #exchange{durable = true,
-                                                type = 'x-delayed-message',
-                                                _ = '_'}, write)
-           end) of
-        {atomic, Xs} ->
-            {ok, Xs};
-        {aborted, Reason} ->
-            {aborted, Reason}
-    end.
+    rabbit_db_exchange:match(#exchange{durable = true,
+                                       type = 'x-delayed-message',
+                                       _ = '_'}).
 
 recover_exchange_and_bindings(#exchange{name = XName} = X) ->
-    %%TODO Use khepri here ofc.
-    mnesia:transaction(
-        fun () ->
-            Bindings = rabbit_binding:list_for_source(XName),
+    rabbit_khepri:transaction(
+      fun () ->
+              Bindings = rabbit_binding:list_for_source(XName),
                 _ = [rabbit_exchange_type_delayed_message:add_binding(transaction, X, B)
                  || B <- lists:usort(Bindings)],
             rabbit_log:debug("Delayed message exchange: "
